@@ -2,21 +2,16 @@ name: Release rapidsim
 
 on:
   repository_dispatch:
-    types:
-      - rapid-release
-      - rapid-release-test
+    types: [rapid-release]
 
   workflow_dispatch:
     inputs:
       rapid_tag:
         description: "RAPID release tag to test"
         required: true
-        default: "v2.2.3"
-
       previous_rapid_tag:
-        description: "Previous RAPID release tag"
+        description: "Previous RAPID release tag to test"
         required: true
-        default: "v2.2.2"
 
 jobs:
   prepare-release:
@@ -38,12 +33,6 @@ jobs:
             rapid_tag="${{ inputs.rapid_tag }}"
             previous_rapid_tag="${{ inputs.previous_rapid_tag }}"
             echo "MANUAL TEST MODE"
-
-          elif [ "${{ github.event.action }}" = "rapid-release-test" ]; then
-            rapid_tag="${{ github.event.client_payload.rapid_tag }}"
-            previous_rapid_tag="${{ github.event.client_payload.previous_rapid_tag }}"
-            echo "DISPATCH TEST MODE"
-
           else
             rapid_tag="${{ github.event.client_payload.rapid_tag }}"
 
@@ -123,32 +112,16 @@ jobs:
           next_version="${next_major}.${next_minor}.${next_patch}"
 
           echo "New rapidsim:     $next_version"
-
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
       - name: Test mode summary
-        if: github.event_name == 'workflow_dispatch' || github.event.action == 'rapid-release-test'
+        if: github.event_name == 'workflow_dispatch'
         run: |
           echo "======================================"
           echo "RAPIDSIM RELEASE TEST"
           echo "======================================"
           echo "Previous RAPID:   ${{ steps.release.outputs.previous_rapid_tag }}"
           echo "New RAPID:        ${{ steps.release.outputs.rapid_tag }}"
-
-          echo "Current rapidsim: $(python - <<'PY'
-          import re
-
-          text = open("pyproject.toml").read()
-
-          print(
-              re.search(
-                  r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"',
-                  text
-              ).group(1)
-          )
-          PY
-          )"
-
           echo "New rapidsim:     ${{ steps.version.outputs.version }}"
           echo ""
           echo "TEST ONLY:"
@@ -160,13 +133,13 @@ jobs:
           echo "======================================"
 
       - name: Update RAPID submodule
-        if: github.event_name == 'repository_dispatch' && github.event.action == 'rapid-release'
+        if: github.event_name == 'repository_dispatch'
         run: |
           git -C external/RAPID fetch --tags
           git -C external/RAPID checkout "${{ steps.release.outputs.rapid_tag }}"
 
       - name: Update rapidsim version
-        if: github.event_name == 'repository_dispatch' && github.event.action == 'rapid-release'
+        if: github.event_name == 'repository_dispatch'
         env:
           NEW_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -176,7 +149,6 @@ jobs:
 
           new_version = os.environ["NEW_VERSION"]
 
-          # Update pyproject.toml
           with open("pyproject.toml") as f:
               text = f.read()
 
@@ -195,7 +167,6 @@ jobs:
           with open("pyproject.toml", "w") as f:
               f.write(text)
 
-          # Update setup.py
           with open("setup.py") as f:
               text = f.read()
 
@@ -216,7 +187,7 @@ jobs:
           PY
 
       - name: Commit release preparation
-        if: github.event_name == 'repository_dispatch' && github.event.action == 'rapid-release'
+        if: github.event_name == 'repository_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
