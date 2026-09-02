@@ -4,6 +4,13 @@ on:
   repository_dispatch:
     types: [rapid-release]
 
+  workflow_dispatch:
+    inputs:
+      rapid_tag:
+        description: "RAPID release tag to test"
+        required: true
+        default: "v2.2.3"
+
 jobs:
   prepare-release:
     name: Prepare release
@@ -19,7 +26,7 @@ jobs:
         id: versions
         shell: bash
         run: |
-          rapid_tag="${{ github.event.client_payload.rapid_tag }}"
+          ${{ github.event.client_payload.rapid_tag || inputs.rapid_tag }}
           rapid_version="${rapid_tag#v}"
 
           current_rapidsim=$(python - <<'PY'
