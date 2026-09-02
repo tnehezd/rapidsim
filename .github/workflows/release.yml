@@ -9,6 +9,11 @@ on:
       rapid_tag:
         description: "RAPID release tag to test"
         required: true
+        default: "v2.2.4"
+
+      previous_rapid_tag:
+        description: "Previous RAPID release tag"
+        required: true
         default: "v2.2.3"
 
 jobs:
@@ -21,28 +26,51 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
-      - name: Determine RAPID release tag
+      - name: Determine RAPID release tags
         id: release
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             rapid_tag="${{ inputs.rapid_tag }}"
+            previous_rapid_tag="${{ inputs.previous_rapid_tag }}"
             echo "TEST MODE"
           else
             rapid_tag="${{ github.event.client_payload.rapid_tag }}"
+
+            # Determine the previous RAPID release from the existing
+            # RAPID submodule revision before updating it.
+            git -C external/RAPID fetch --tags
+            previous_rapid_tag=$(
+              git -C external/RAPID describe \
+                --tags \
+                --abbrev=0 \
+                HEAD
+            )
+
             echo "RELEASE MODE"
           fi
 
-          echo "RAPID tag: $rapid_tag"
-          echo "rapid_tag=$rapid_tag" >> "$GITHUB_OUTPUT"
+          echo "RAPID previous tag: $previous_rapid_tag"
+          echo "RAPID new tag:      $rapid_tag"
 
-      - name: Calculate version
+          echo "rapid_tag=$rapid_tag" >> "$GITHUB_OUTPUT"
+          echo "previous_rapid_tag=$previous_rapid_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate rapidsim version
         id: version
         shell: bash
         run: |
           rapid_tag="${{ steps.release.outputs.rapid_tag }}"
+          previous_rapid_tag="${{ steps.release.outputs.previous_rapid_tag }}"
+
           rapid_version="${rapid_tag#v}"
+          previous_rapid_version="${previous_rapid_tag#v}"
+
+          # Remove prerelease suffixes such as -beta if present.
+          rapid_version="${rapid_version%%-*}"
+          previous_rapid_version="${previous_rapid_version%%-*}"
 
           current_rapidsim=$(python - <<'PY'
           import re
@@ -62,15 +90,9 @@ jobs:
           PY
           )
 
-          previous_rapid_version=$(
-            git -C external/RAPID describe --tags --abbrev=0 \
-              | sed 's/^v//' \
-              | sed 's/-.*//'
-          )
-
-          echo "Previous RAPID:  $previous_rapid_version"
-          echo "New RAPID:       $rapid_version"
-          echo "rapidsim current: $current_rapidsim"
+          echo "Previous RAPID:   $previous_rapid_version"
+          echo "New RAPID:        $rapid_version"
+          echo "Current rapidsim:  $current_rapidsim"
 
           IFS='.' read -r current_major current_minor current_patch <<< "$current_rapidsim"
           IFS='.' read -r prev_major prev_minor prev_patch <<< "$previous_rapid_version"
@@ -80,10 +102,12 @@ jobs:
             next_major=$((current_major + 1))
             next_minor=0
             next_patch=0
+
           elif [ "$new_minor" -gt "$prev_minor" ]; then
             next_major=$current_major
             next_minor=$((current_minor + 1))
             next_patch=0
+
           else
             next_major=$current_major
             next_minor=$current_minor
@@ -92,7 +116,7 @@ jobs:
 
           next_version="${next_major}.${next_minor}.${next_patch}"
 
-          echo "New rapidsim:    $next_version"
+          echo "New rapidsim:     $next_version"
 
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
@@ -102,14 +126,22 @@ jobs:
           echo "======================================"
           echo "RAPIDSIM RELEASE TEST"
           echo "======================================"
-          echo "RAPID release:   ${{ steps.release.outputs.rapid_tag }}"
-          echo "rapidsim current: $(python - <<'PY'
+          echo "Previous RAPID:   ${{ steps.release.outputs.previous_rapid_tag }}"
+          echo "New RAPID:        ${{ steps.release.outputs.rapid_tag }}"
+          echo "Current rapidsim: $(python - <<'PY'
           import re
+
           text = open("pyproject.toml").read()
-          print(re.search(r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"', text).group(1))
+
+          print(
+              re.search(
+                  r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"',
+                  text
+              ).group(1)
+          )
           PY
           )"
-          echo "rapidsim next:   ${{ steps.version.outputs.version }}"
+          echo "New rapidsim:     ${{ steps.version.outputs.version }}"
           echo ""
           echo "TEST ONLY:"
           echo "- no submodule update"
@@ -136,6 +168,7 @@ jobs:
 
           new_version = os.environ["NEW_VERSION"]
 
+          # Update pyproject.toml
           with open("pyproject.toml") as f:
               text = f.read()
 
@@ -147,11 +180,14 @@ jobs:
           )
 
           if count != 1:
-              raise SystemExit("Could not update version in pyproject.toml")
+              raise SystemExit(
+                  "Could not update version in pyproject.toml"
+              )
 
           with open("pyproject.toml", "w") as f:
               f.write(text)
 
+          # Update setup.py
           with open("setup.py") as f:
               text = f.read()
 
@@ -163,7 +199,9 @@ jobs:
           )
 
           if count != 1:
-              raise SystemExit("Could not update version in setup.py")
+              raise SystemExit(
+                  "Could not update version in setup.py"
+              )
 
           with open("setup.py", "w") as f:
               f.write(text)
@@ -176,5 +214,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add pyproject.toml setup.py external/RAPID
-          git commit -m "release: rapidsim ${{ steps.version.outputs.version }}"
+
+          git commit \
+            -m "release: rapidsim ${{ steps.version.outputs.version }}"
+
           git push
