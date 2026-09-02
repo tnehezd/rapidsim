@@ -68,7 +68,7 @@ cmdclass = {
 
 setup(
     name="rapidsim",
-    version="1.0.8",
+    version="1.0.9",
     packages=["rapidsim"],
     package_data={
         "rapidsim": [
