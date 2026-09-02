@@ -14,9 +14,13 @@ on:
         required: true
 
 jobs:
-  prepare-release:
+  prepare:
     name: Prepare release
     runs-on: ubuntu-latest
+
+    outputs:
+      rapid_tag: ${{ steps.release.outputs.rapid_tag }}
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout rapidsim
@@ -48,8 +52,8 @@ jobs:
             echo "REAL RELEASE MODE"
           fi
 
-          echo "RAPID previous tag: $previous_rapid_tag"
-          echo "RAPID new tag:      $rapid_tag"
+          echo "Previous RAPID tag: $previous_rapid_tag"
+          echo "New RAPID tag:      $rapid_tag"
 
           echo "rapid_tag=$rapid_tag" >> "$GITHUB_OUTPUT"
           echo "previous_rapid_tag=$previous_rapid_tag" >> "$GITHUB_OUTPUT"
@@ -70,8 +74,7 @@ jobs:
           current_rapidsim=$(python - <<'PY'
           import re
 
-          with open("pyproject.toml") as f:
-              text = f.read()
+          text = open("pyproject.toml").read()
 
           match = re.search(
               r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"',
@@ -114,7 +117,7 @@ jobs:
           echo "New rapidsim:     $next_version"
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
-      - name: Test mode summary
+      - name: Test summary
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "======================================"
@@ -123,27 +126,143 @@ jobs:
           echo "Previous RAPID:   ${{ steps.release.outputs.previous_rapid_tag }}"
           echo "New RAPID:        ${{ steps.release.outputs.rapid_tag }}"
           echo "New rapidsim:     ${{ steps.version.outputs.version }}"
-          echo ""
-          echo "TEST ONLY:"
-          echo "- no submodule update"
-          echo "- no file changes"
-          echo "- no commit"
-          echo "- no push"
-          echo "- no PyPI upload"
           echo "======================================"
 
+  build:
+    name: Build on ${{ matrix.os }}
+    needs: prepare
+    if: github.event_name == 'repository_dispatch'
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout rapidsim
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
       - name: Update RAPID submodule
-        if: github.event_name == 'repository_dispatch'
+        env:
+          RAPID_TAG: ${{ needs.prepare.outputs.rapid_tag }}
         run: |
           git -C external/RAPID fetch --tags
-          git -C external/RAPID checkout "${{ steps.release.outputs.rapid_tag }}"
+          git -C external/RAPID checkout "$RAPID_TAG"
+
+      - name: Set rapidsim version
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+
+          new_version = os.environ["NEW_VERSION"]
+
+          # pyproject.toml
+          with open("pyproject.toml") as f:
+              text = f.read()
+
+          text, count = re.subn(
+              r'(?m)^version\s*=\s*"\d+\.\d+\.\d+"',
+              f'version = "{new_version}"',
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit("Could not update pyproject.toml")
+
+          with open("pyproject.toml", "w") as f:
+              f.write(text)
+
+          # setup.py
+          with open("setup.py") as f:
+              text = f.read()
+
+          text, count = re.subn(
+              r'version\s*=\s*"\d+\.\d+\.\d+"',
+              f'version="{new_version}"',
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit("Could not update setup.py")
+
+          with open("setup.py", "w") as f:
+              f.write(text)
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev libomp-dev
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install hdf5 libomp
+
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+
+      - name: Build wheel
+        run: |
+          python -m build --wheel
+
+      - name: Check wheel contents
+        run: |
+          python -m zipfile -l dist/*.whl | grep "rapidsim/data/simulation"
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapidsim-${{ runner.os }}-release-wheel
+          path: dist/*.whl
+
+  commit-release:
+    name: Commit release
+    needs:
+      - prepare
+      - build
+    if: github.event_name == 'repository_dispatch'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout rapidsim
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Update RAPID submodule
+        env:
+          RAPID_TAG: ${{ needs.prepare.outputs.rapid_tag }}
+        run: |
+          git -C external/RAPID fetch --tags
+          git -C external/RAPID checkout "$RAPID_TAG"
 
       - name: Update rapidsim version
-        if: github.event_name == 'repository_dispatch'
         env:
-          NEW_VERSION: ${{ steps.version.outputs.version }}
+          NEW_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import os
           import re
 
@@ -160,9 +279,7 @@ jobs:
           )
 
           if count != 1:
-              raise SystemExit(
-                  "Could not update version in pyproject.toml"
-              )
+              raise SystemExit("Could not update pyproject.toml")
 
           with open("pyproject.toml", "w") as f:
               f.write(text)
@@ -178,23 +295,21 @@ jobs:
           )
 
           if count != 1:
-              raise SystemExit(
-                  "Could not update version in setup.py"
-              )
+              raise SystemExit("Could not update setup.py")
 
           with open("setup.py", "w") as f:
               f.write(text)
           PY
 
-      - name: Commit release preparation
-        if: github.event_name == 'repository_dispatch'
+      - name: Commit release
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add pyproject.toml setup.py external/RAPID
 
-          git commit \
-            -m "release: rapidsim ${{ steps.version.outputs.version }}"
+          git commit -m "release: rapidsim ${NEW_VERSION}"
 
           git push
