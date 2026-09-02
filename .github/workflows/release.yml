@@ -37,6 +37,7 @@ jobs:
             rapid_tag="${{ inputs.rapid_tag }}"
             previous_rapid_tag="${{ inputs.previous_rapid_tag }}"
             echo "MANUAL TEST MODE"
+
           else
             rapid_tag="${{ github.event.client_payload.rapid_tag }}"
 
@@ -74,7 +75,8 @@ jobs:
           current_rapidsim=$(python - <<'PY'
           import re
 
-          text = open("pyproject.toml").read()
+          with open("pyproject.toml") as f:
+              text = f.read()
 
           match = re.search(
               r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"',
@@ -125,6 +127,7 @@ jobs:
           echo "======================================"
           echo "Previous RAPID:   ${{ steps.release.outputs.previous_rapid_tag }}"
           echo "New RAPID:        ${{ steps.release.outputs.rapid_tag }}"
+          echo "Current rapidsim: $(grep '^version' pyproject.toml)"
           echo "New rapidsim:     ${{ steps.version.outputs.version }}"
           echo "======================================"
 
@@ -155,7 +158,7 @@ jobs:
           git -C external/RAPID fetch --tags
           git -C external/RAPID checkout "$RAPID_TAG"
 
-      - name: Set rapidsim version
+      - name: Update rapidsim version
         env:
           NEW_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -235,11 +238,38 @@ jobs:
           name: rapidsim-${{ runner.os }}-release-wheel
           path: dist/*.whl
 
+  pypi-publish:
+    name: Publish to PyPI
+    needs: build
+    if: github.event_name == 'repository_dispatch'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download release wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rapidsim-*-release-wheel
+          path: dist
+          merge-multiple: true
+
+      - name: List distributions
+        run: |
+          ls -lah dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
   commit-release:
     name: Commit release
     needs:
       - prepare
       - build
+      - pypi-publish
+
     if: github.event_name == 'repository_dispatch'
 
     runs-on: ubuntu-latest
@@ -310,6 +340,7 @@ jobs:
 
           git add pyproject.toml setup.py external/RAPID
 
-          git commit -m "release: rapidsim ${NEW_VERSION}"
+          git commit \
+            -m "release: rapidsim ${NEW_VERSION}"
 
           git push
