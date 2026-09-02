@@ -11,12 +11,12 @@ on:
       rapid_tag:
         description: "RAPID release tag to test"
         required: true
-        default: "v2.2.4"
+        default: "v2.2.3"
 
       previous_rapid_tag:
         description: "Previous RAPID release tag"
         required: true
-        default: "v2.2.3"
+        default: "v2.2.2"
 
 jobs:
   prepare-release:
@@ -37,13 +37,18 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             rapid_tag="${{ inputs.rapid_tag }}"
             previous_rapid_tag="${{ inputs.previous_rapid_tag }}"
-            echo "TEST MODE"
+            echo "MANUAL TEST MODE"
+
+          elif [ "${{ github.event.action }}" = "rapid-release-test" ]; then
+            rapid_tag="${{ github.event.client_payload.rapid_tag }}"
+            previous_rapid_tag="${{ github.event.client_payload.previous_rapid_tag }}"
+            echo "DISPATCH TEST MODE"
+
           else
             rapid_tag="${{ github.event.client_payload.rapid_tag }}"
 
-            # Determine the previous RAPID release from the existing
-            # RAPID submodule revision before updating it.
             git -C external/RAPID fetch --tags
+
             previous_rapid_tag=$(
               git -C external/RAPID describe \
                 --tags \
@@ -51,7 +56,7 @@ jobs:
                 HEAD
             )
 
-            echo "RELEASE MODE"
+            echo "REAL RELEASE MODE"
           fi
 
           echo "RAPID previous tag: $previous_rapid_tag"
@@ -70,7 +75,6 @@ jobs:
           rapid_version="${rapid_tag#v}"
           previous_rapid_version="${previous_rapid_tag#v}"
 
-          # Remove prerelease suffixes such as -beta if present.
           rapid_version="${rapid_version%%-*}"
           previous_rapid_version="${previous_rapid_version%%-*}"
 
@@ -94,7 +98,7 @@ jobs:
 
           echo "Previous RAPID:   $previous_rapid_version"
           echo "New RAPID:        $rapid_version"
-          echo "Current rapidsim:  $current_rapidsim"
+          echo "Current rapidsim: $current_rapidsim"
 
           IFS='.' read -r current_major current_minor current_patch <<< "$current_rapidsim"
           IFS='.' read -r prev_major prev_minor prev_patch <<< "$previous_rapid_version"
@@ -123,13 +127,14 @@ jobs:
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
       - name: Test mode summary
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event.action == 'rapid-release-test'
         run: |
           echo "======================================"
           echo "RAPIDSIM RELEASE TEST"
           echo "======================================"
           echo "Previous RAPID:   ${{ steps.release.outputs.previous_rapid_tag }}"
           echo "New RAPID:        ${{ steps.release.outputs.rapid_tag }}"
+
           echo "Current rapidsim: $(python - <<'PY'
           import re
 
@@ -143,6 +148,7 @@ jobs:
           )
           PY
           )"
+
           echo "New rapidsim:     ${{ steps.version.outputs.version }}"
           echo ""
           echo "TEST ONLY:"
@@ -154,13 +160,13 @@ jobs:
           echo "======================================"
 
       - name: Update RAPID submodule
-        if: github.event_name == 'repository_dispatch'
+        if: github.event_name == 'repository_dispatch' && github.event.action == 'rapid-release'
         run: |
           git -C external/RAPID fetch --tags
           git -C external/RAPID checkout "${{ steps.release.outputs.rapid_tag }}"
 
       - name: Update rapidsim version
-        if: github.event_name == 'repository_dispatch'
+        if: github.event_name == 'repository_dispatch' && github.event.action == 'rapid-release'
         env:
           NEW_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -210,7 +216,7 @@ jobs:
           PY
 
       - name: Commit release preparation
-        if: github.event_name == 'repository_dispatch'
+        if: github.event_name == 'repository_dispatch' && github.event.action == 'rapid-release'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
