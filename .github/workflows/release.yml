@@ -1,0 +1,134 @@
+name: Release rapidsim
+
+on:
+  repository_dispatch:
+    types: [rapid-release]
+
+jobs:
+  prepare-release:
+    name: Prepare release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout rapidsim
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read release versions
+        id: versions
+        shell: bash
+        run: |
+          rapid_tag="${{ github.event.client_payload.rapid_tag }}"
+          rapid_version="${rapid_tag#v}"
+
+          current_rapidsim=$(python - <<'PY'
+          import re
+
+          with open("pyproject.toml") as f:
+              text = f.read()
+
+          match = re.search(
+              r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"',
+              text
+          )
+
+          if not match:
+              raise SystemExit("Could not determine rapidsim version")
+
+          print(match.group(1))
+          PY
+          )
+
+          previous_rapid_version=$(
+            git -C external/RAPID describe --tags --abbrev=0 \
+              | sed 's/^v//' \
+              | sed 's/-.*//'
+          )
+
+          echo "RAPID previous: $previous_rapid_version"
+          echo "RAPID new:      $rapid_version"
+          echo "rapidsim old:   $current_rapidsim"
+
+          IFS='.' read -r current_major current_minor current_patch <<< "$current_rapidsim"
+          IFS='.' read -r prev_major prev_minor prev_patch <<< "$previous_rapid_version"
+          IFS='.' read -r new_major new_minor new_patch <<< "$rapid_version"
+
+          if [ "$new_major" -gt "$prev_major" ]; then
+            next_major=$((current_major + 1))
+            next_minor=0
+            next_patch=0
+          elif [ "$new_minor" -gt "$prev_minor" ]; then
+            next_major=$current_major
+            next_minor=$((current_minor + 1))
+            next_patch=0
+          else
+            next_major=$current_major
+            next_minor=$current_minor
+            next_patch=$((current_patch + 1))
+          fi
+
+          next_version="${next_major}.${next_minor}.${next_patch}"
+
+          echo "New rapidsim:   $next_version"
+          echo "rapid_tag=$rapid_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Update RAPID submodule
+        run: |
+          git -C external/RAPID fetch --tags
+          git -C external/RAPID checkout "${{ steps.versions.outputs.rapid_tag }}"
+
+      - name: Update rapidsim version
+        env:
+          NEW_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          new_version = os.environ["NEW_VERSION"]
+
+          # pyproject.toml
+          with open("pyproject.toml") as f:
+              text = f.read()
+
+          text, count = re.subn(
+              r'(?m)^version\s*=\s*"\d+\.\d+\.\d+"',
+              f'version = "{new_version}"',
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit("Could not update version in pyproject.toml")
+
+          with open("pyproject.toml", "w") as f:
+              f.write(text)
+
+          # setup.py
+          with open("setup.py") as f:
+              text = f.read()
+
+          text, count = re.subn(
+              r'version\s*=\s*"\d+\.\d+\.\d+"',
+              f'version="{new_version}"',
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit("Could not update version in setup.py")
+
+          with open("setup.py", "w") as f:
+              f.write(text)
+          PY
+
+      - name: Commit release preparation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add pyproject.toml setup.py external/RAPID
+          git commit -m "release: rapidsim ${{ steps.versions.outputs.version }}"
+          git push
