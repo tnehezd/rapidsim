@@ -2,7 +2,9 @@ name: Release rapidsim
 
 on:
   repository_dispatch:
-    types: [rapid-release]
+    types:
+      - rapid-release
+      - rapid-release-test
 
   workflow_dispatch:
     inputs:
