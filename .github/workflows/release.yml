@@ -37,7 +37,6 @@ jobs:
             rapid_tag="${{ inputs.rapid_tag }}"
             previous_rapid_tag="${{ inputs.previous_rapid_tag }}"
             echo "MANUAL TEST MODE"
-
           else
             rapid_tag="${{ github.event.client_payload.rapid_tag }}"
 
@@ -75,8 +74,7 @@ jobs:
           current_rapidsim=$(python - <<'PY'
           import re
 
-          with open("pyproject.toml") as f:
-              text = f.read()
+          text = open("pyproject.toml").read()
 
           match = re.search(
               r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"',
@@ -119,7 +117,7 @@ jobs:
           echo "New rapidsim:     $next_version"
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
-      - name: Test summary
+      - name: Test mode summary
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "======================================"
@@ -132,7 +130,7 @@ jobs:
           echo "======================================"
 
   build:
-    name: Build on ${{ matrix.os }}
+    name: Build wheel on ${{ matrix.os }}
     needs: prepare
     if: github.event_name == 'repository_dispatch'
 
@@ -142,7 +140,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - macos-latest
+          - macos-15-intel
 
     steps:
       - name: Checkout rapidsim
@@ -203,72 +201,51 @@ jobs:
               f.write(text)
           PY
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libhdf5-dev libomp-dev
-
-      - name: Install system dependencies (macOS)
+      - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
           brew install hdf5 libomp
 
-      - name: Install Python build dependencies
+      - name: Install cibuildwheel
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install build
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cibuildwheel==4.2.0
 
       - name: Build wheel
+        env:
+          CIBW_BUILD: cp310-*
+          CIBW_SKIP: "*-musllinux_*"
+
+          # Linux: use Ubuntu-based manylinux image so the existing
+          # RAPID Makefile HDF5 paths remain valid.
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_31
+          CIBW_BEFORE_ALL_LINUX: >
+            apt-get update &&
+            apt-get install -y
+            libhdf5-dev
+            make
+            gcc
+            g++
+
         run: |
-          python -m build --wheel
+          python3 -m cibuildwheel --output-dir wheelhouse
 
       - name: Check wheel contents
         run: |
-          python -m zipfile -l dist/*.whl | grep "rapidsim/data/simulation"
+          ls -lah wheelhouse
+          python3 -m zipfile -l wheelhouse/*.whl | grep "rapidsim/data/simulation"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           name: rapidsim-${{ runner.os }}-release-wheel
-          path: dist/*.whl
-
-  pypi-publish:
-    name: Publish to PyPI
-    needs: build
-    if: github.event_name == 'repository_dispatch'
-
-    runs-on: ubuntu-latest
-
-    permissions:
-      id-token: write
-
-    steps:
-      - name: Download release wheels
-        uses: actions/download-artifact@v4
-        with:
-          pattern: rapidsim-*-release-wheel
-          path: dist
-          merge-multiple: true
-
-      - name: List distributions
-        run: |
-          ls -lah dist
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          path: wheelhouse/*.whl
 
   commit-release:
     name: Commit release
     needs:
       - prepare
       - build
-      - pypi-publish
 
     if: github.event_name == 'repository_dispatch'
 
@@ -344,3 +321,32 @@ jobs:
             -m "release: rapidsim ${NEW_VERSION}"
 
           git push
+
+  pypi-publish:
+    name: Publish to PyPI
+    needs:
+      - prepare
+      - build
+      - commit-release
+
+    if: github.event_name == 'repository_dispatch'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download release wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rapidsim-*-release-wheel
+          path: dist
+          merge-multiple: true
+
+      - name: List distributions
+        run: |
+          ls -lah dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
