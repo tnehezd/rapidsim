@@ -307,16 +307,16 @@ jobs:
             --output-dir wheelhouse
 
 
-      - name: Check wheel
-        shell: bash
+        - name: Check wheels
+          shell: bash
+          run: |
+            ls -lah wheelhouse
 
-        run: |
-
-          ls -lah wheelhouse
-
-          python3 -m zipfile -l wheelhouse/*.whl \
-            | grep "rapidsim/data/simulation"
-
+            for wheel in wheelhouse/*.whl; do
+              echo "Checking $wheel"
+              python3 -m zipfile -l "$wheel" \
+                | grep "rapidsim/data/simulation"
+            done
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
