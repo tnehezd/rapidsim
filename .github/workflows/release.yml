@@ -292,8 +292,7 @@ jobs:
 
           MACOSX_DEPLOYMENT_TARGET: "14.0"
 
-          CIBW_BUILD: cp310-*
-
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-musllinux_*"
 
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
