@@ -100,12 +100,10 @@ jobs:
             next_major=$((current_major + 1))
             next_minor=0
             next_patch=0
-
           elif [ "$new_minor" -gt "$prev_minor" ]; then
             next_major=$current_major
             next_minor=$((current_minor + 1))
             next_patch=0
-
           else
             next_major=$current_major
             next_minor=$current_minor
@@ -117,7 +115,7 @@ jobs:
           echo "New rapidsim:     $next_version"
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
-      - name: Test mode summary
+      - name: Test summary
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "======================================"
@@ -141,6 +139,7 @@ jobs:
         os:
           - ubuntu-latest
           - macos-15-intel
+          - macos-14
 
     steps:
       - name: Checkout rapidsim
@@ -166,7 +165,6 @@ jobs:
 
           new_version = os.environ["NEW_VERSION"]
 
-          # pyproject.toml
           with open("pyproject.toml") as f:
               text = f.read()
 
@@ -183,7 +181,6 @@ jobs:
           with open("pyproject.toml", "w") as f:
               f.write(text)
 
-          # setup.py
           with open("setup.py") as f:
               text = f.read()
 
@@ -216,29 +213,27 @@ jobs:
           CIBW_BUILD: cp310-*
           CIBW_SKIP: "*-musllinux_*"
 
-          # Linux: use Ubuntu-based manylinux image so the existing
-          # RAPID Makefile HDF5 paths remain valid.
-          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_31
+          # Linux: build inside a manylinux container
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+
+          # The manylinux image uses yum/dnf, not apt.
           CIBW_BEFORE_ALL_LINUX: >
-            apt-get update &&
-            apt-get install -y
-            libhdf5-dev
-            make
-            gcc
-            g++
+            yum install -y hdf5-devel make gcc gcc-c++
 
         run: |
           python3 -m cibuildwheel --output-dir wheelhouse
 
-      - name: Check wheel contents
+      - name: Check wheel
+        shell: bash
         run: |
           ls -lah wheelhouse
-          python3 -m zipfile -l wheelhouse/*.whl | grep "rapidsim/data/simulation"
+          python3 -m zipfile -l wheelhouse/*.whl \
+            | grep "rapidsim/data/simulation"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: rapidsim-${{ runner.os }}-release-wheel
+          name: rapidsim-${{ matrix.os }}-release-wheel
           path: wheelhouse/*.whl
 
   commit-release:
