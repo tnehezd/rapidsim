@@ -236,8 +236,12 @@ jobs:
           name: rapidsim-${{ matrix.os }}-release-wheel
           path: wheelhouse/*.whl
 
-  commit-release:
+    commit-release:
     name: Commit release
+
+    permissions:
+      contents: write
+
     needs:
       - prepare
       - build
@@ -312,8 +316,7 @@ jobs:
 
           git add pyproject.toml setup.py external/RAPID
 
-          git commit \
-            -m "release: rapidsim ${NEW_VERSION}"
+          git commit -m "release: rapidsim ${NEW_VERSION}"
 
           git push
 
