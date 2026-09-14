@@ -119,7 +119,7 @@ def main():
         "gaussian_smoothing_sigma_grid_units": "-gaussian_sigma_grid_units",
         "gaussian_smoothing_cutoff_sigma": "-gaussian_cutoff_sigma", 
         "input_file": "-i", "output_dir_name": "-o",
-        "output_format": "--output-format", "dust_smoothing_mode": "-dust_smoothing",
+        "output_format": "-output_format", "dust_smoothing_mode": "-dust_smoothing",
         "tStep": "-tStep", "totalTime": "-tmax", "outputFrequency": "-outfreq"
     }
 
