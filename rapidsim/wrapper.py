@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import yaml
 import subprocess
 import datetime
@@ -7,17 +8,14 @@ import datetime
 PREFIX = "[PY-WRAPPER: RAPIDSIM]"
 
 def get_version():
-    # 1. Megpróbáljuk kiolvasni a feltelepített csomag metaadatából (ez a legtisztább)
     try:
         import importlib.metadata as importlib_metadata
         return importlib_metadata.version("rapidsim")
     except Exception:
         pass
 
-    # 2. Ha nincs feltelepítve, vagy fejlesztői módban vagyunk, olvassuk ki élőben a pyproject.toml-ből vagy setup.py-ból
     try:
         package_dir = os.path.dirname(os.path.abspath(__file__))
-        # Megkeressük a gyökeret (akár a wrapper mappájából, akár egy szinttel feljebb)
         for path_candidate in [
             os.path.join(package_dir, "..", "pyproject.toml"),
             os.path.join(package_dir, "pyproject.toml"),
@@ -50,7 +48,7 @@ def main():
         return
 
     try:
-        with open(config_file, 'r') as f:
+        with open(config_file, 'r', encoding='utf-8') as f:
             full_config = yaml.safe_load(f) or {}
     except yaml.YAMLError as exc:
         print(f"{PREFIX} Error parsing YAML file '{config_file}': {exc}")
@@ -91,7 +89,7 @@ def main():
         "input_file_path": "input_file", "output_directory_name": "output_dir_name",
         "output_format": "output_format", "fixed_time_step": "tStep",
         "total_simulation_time": "totalTime", "output_write_frequency": "outputFrequency",
-        "dust_smoothing_mode": "dust_smoothing_mode",
+        "dust_smoothing_mode": "dust_smoothing_mode", "test_mode": "test_mode",
     }
 
     for section in yaml_sections:
@@ -116,19 +114,17 @@ def main():
         "r_dze_i_val": "-rdzei", "r_dze_o_val": "-rdzeo",
         "dr_dze_i_val": "-drdzei", "dr_dze_o_val": "-drdzeo",
         "a_mod_val": "-amod", "density_floor": "-density_floor", "dust_density_floor": "-dust_density_floor",
-        "eps_val": "-eps", "ratio_val": "-ratio", "mic_val": "-mic", "onesize_val": "-onesize",
-        "pdensity_val": "-pdensity",
-        
-        # Gaussian smoothing mappings expected by the C parser
+        "eps_val": "-eps", "ratio_val": "-ratio", "mic_val": "-micsize", "onesize_val": "-largesize",
+        "pdensity_val": "-pdensity", "test_mode": "--test",
         "gaussian_smoothing_sigma_grid_units": "-gaussian_sigma_grid_units",
         "gaussian_smoothing_cutoff_sigma": "-gaussian_cutoff_sigma", 
-        
         "input_file": "-i", "output_dir_name": "-o",
         "output_format": "--output-format", "dust_smoothing_mode": "-dust_smoothing",
         "tStep": "-tStep", "totalTime": "-tmax", "outputFrequency": "-outfreq"
     }
 
     cmd_args = []
+
     verbosity_level = full_config.get("log_parameters", {}).get("info_level", "none")
     if verbosity_level == "info":
         cmd_args.append("-v")
@@ -140,25 +136,21 @@ def main():
         if c_arg_name:
             if isinstance(value, bool):
                 cmd_args.extend([c_arg_name, "1.0" if value else "0.0"])
-            elif c_arg_name == "-i":
+            elif c_arg_name in ["-i", "-o", "--test"]:
                 if value is not None and str(value).strip() != "":
                     cmd_args.extend([c_arg_name, str(value)])
-            elif c_arg_name == "-o":
-                if value is not None and str(value).strip() != "":
-                    cmd_args.extend([c_arg_name, str(value)])
-                else:
+                elif c_arg_name == "-o":
                     cmd_args.extend([c_arg_name, "output"])
             else:
                 cmd_args.extend([c_arg_name, str(value)])
 
-    # Robust binary location resolver (checking data/ directory first)
     package_dir = os.path.dirname(os.path.abspath(__file__))
     possible_paths = [
-        os.path.join(package_dir, "data", "simulation"),          # 1. Inside installed package data/
-        os.path.join(package_dir, "bin", "simulation"),          # 2. Legacy / fallback inside package
-        os.path.abspath(os.path.join(package_dir, "..", "bin", "simulation")), # 3. Parent relative
-        os.path.abspath("./bin/simulation"),                     # 4. Current working directory bin/
-        os.path.abspath("../bin/simulation")                     # 5. One level up cwd
+        os.path.join(package_dir, "data", "simulation"),
+        os.path.join(package_dir, "bin", "simulation"),
+        os.path.abspath(os.path.join(package_dir, "..", "bin", "simulation")),
+        os.path.abspath("./bin/simulation"),
+        os.path.abspath("../bin/simulation")
     ]
 
     binary_path = None
@@ -188,7 +180,7 @@ def main():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            encoding='cp1252',
+            encoding='utf-8',
             errors='replace',
             bufsize=1,
             env=current_env
