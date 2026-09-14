@@ -85,7 +85,7 @@ def main():
         "deadzone_outer_transition_width": "dr_dze_o_val",
         "deadzone_alpha_reduction": "a_mod_val", "initial_dust_to_gas_ratio": "eps_val",
         "population_one_mass_ratio": "ratio_val", "micro_particle_size_cm": "mic_val",
-        "one_size_particle_value_cm": "onesize_val", "dust_particle_density_g_cm3": "pdensity_val",
+        "large_size_particle_value_cm": "onesize_val", "dust_particle_density_g_cm3": "pdensity_val",
         "input_file_path": "input_file", "output_directory_name": "output_dir_name",
         "output_format": "output_format", "fixed_time_step": "tStep",
         "total_simulation_time": "totalTime", "output_write_frequency": "outputFrequency",
