@@ -115,7 +115,7 @@ def main():
         "dr_dze_i_val": "-drdzei", "dr_dze_o_val": "-drdzeo",
         "a_mod_val": "-amod", "density_floor": "-density_floor", "dust_density_floor": "-dust_density_floor",
         "eps_val": "-eps", "ratio_val": "-ratio", "mic_val": "-micsize", "onesize_val": "-largesize",
-        "pdensity_val": "-pdensity", "test_mode": "--test",
+        "pdensity_val": "-pdensity", "test_mode": "-test",
         "gaussian_smoothing_sigma_grid_units": "-gaussian_sigma_grid_units",
         "gaussian_smoothing_cutoff_sigma": "-gaussian_cutoff_sigma", 
         "input_file": "-i", "output_dir_name": "-o",
@@ -126,10 +126,18 @@ def main():
     cmd_args = []
 
     verbosity_level = full_config.get("log_parameters", {}).get("info_level", "none")
+    disable_panels = full_config.get("log_parameters", {}).get("disable_terminal_panels", False)
+
     if verbosity_level == "info":
         cmd_args.append("-v")
     elif verbosity_level == "debug":
         cmd_args.append("-vv")
+
+    # Panel disable flag
+    if disable_panels:
+        cmd_args.append("-no_panels")
+        print(f"{PREFIX} Terminal panels disabled (YAML setting).")
+
 
     for py_key, value in all_params.items():
         c_arg_name = c_arg_mapping.get(py_key)
