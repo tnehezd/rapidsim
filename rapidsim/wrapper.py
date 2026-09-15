@@ -144,7 +144,7 @@ def main():
         if c_arg_name:
             if isinstance(value, bool):
                 cmd_args.extend([c_arg_name, "1.0" if value else "0.0"])
-            elif c_arg_name in ["-i", "-o", "--test"]:
+            elif c_arg_name in ["-i", "-o", "-test"]:
                 if value is not None and str(value).strip() != "":
                     cmd_args.extend([c_arg_name, str(value)])
                 elif c_arg_name == "-o":
