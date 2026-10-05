@@ -53,6 +53,10 @@ def main():
     except yaml.YAMLError as exc:
         print(f"{PREFIX} Error parsing YAML file '{config_file}': {exc}")
         return
+    # --- OMP threads from YAML ---
+    omp_threads = full_config.get("simulation_parameters", {}).get("omp_num_threads", None)
+
+
 
     all_params = {}
 
@@ -67,6 +71,7 @@ def main():
         "enable_gas_evolution": "evol", "enable_photoevaporation": "photoevap",
         "enable_two_dust_populations": "twopop", "fragmentation_velocity": "ufrag",
         "fragmentation_factor": "ffrag", "inner_boundary_condition": "inner_bc",
+        "radial_grid_type": "grid_type",
         "outer_boundary_condition": "outer_bc", "number_of_grid_points": "ngrid_val",
         "number_of_dust_particles": "ndust_val", "inner_radius_au": "rmin_val",
         "outer_radius_au": "rmax_val", "initial_gas_sigma0_msun_per_au2": "sigma0_val",
@@ -104,7 +109,7 @@ def main():
         "drift": "-drift", "growth": "-growth", "evol": "-evol", "twopop": "-twopop",
         "ufrag": "-ufrag", "ffrag": "-ffrag", "photoevap": "-photoevap",
         "ngrid_val": "-n", "ndust_val": "-ndust", 
-        "rmin_val": "-ri", "rmax_val": "-ro",
+        "rmin_val": "-ri", "rmax_val": "-ro", "grid_type": "-grid_type",
         "inner_bc": "-inner_bc", "outer_bc": "-outer_bc",
         "sigma0_val": "-sigma0_init", "sigmap_exp_val": "-index_init",
         "alpha_visc_val": "-alpha_init", "star_val": "-stellar_mass", "disk_mass": "-disk_mass",
@@ -177,7 +182,11 @@ def main():
     print(f"{PREFIX} The current command-line arguments are:\n simulation " + " ".join(cmd_args))
 
     current_env = os.environ.copy()
-    current_env["OMP_NUM_THREADS"] = "1"
+    current_env["OMP_NUM_THREADS"] = (
+        str(omp_threads)
+        if omp_threads is not None
+        else os.environ.get("OMP_NUM_THREADS", "1")
+    )
     print(f"{PREFIX} Setting OMP_NUM_THREADS={current_env['OMP_NUM_THREADS']} for this run.")
     print(f"{PREFIX} Start running the binary ({binary_path}) at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}...\n")
 
