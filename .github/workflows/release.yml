@@ -41,17 +41,31 @@ jobs:
       - name: Determine RAPID release tags
         id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RAPID_TAG: ${{ inputs.rapid_tag }}
+          INPUT_PREVIOUS_RAPID_TAG: ${{ inputs.previous_rapid_tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
 
-            rapid_tag="${{ inputs.rapid_tag }}"
-            previous_rapid_tag="${{ inputs.previous_rapid_tag }}"
+            rapid_tag="$INPUT_RAPID_TAG"
+            previous_rapid_tag="$INPUT_PREVIOUS_RAPID_TAG"
 
             echo "MANUAL TEST MODE"
 
           else
 
-            rapid_tag="${{ github.event.client_payload.rapid_tag }}"
+            # Always link to the most recent RAPID release
+            rapid_tag=$(
+              gh api repos/tnehezd/rapid/releases/latest \
+                --jq .tag_name
+            )
+
+            if [ -z "$rapid_tag" ]; then
+              echo "Could not determine latest RAPID release"
+              exit 1
+            fi
 
             git -C external/RAPID fetch --tags
 
@@ -309,11 +323,20 @@ jobs:
 
       - name: Check wheels
         shell: bash
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           ls -lah wheelhouse
 
           for wheel in wheelhouse/*.whl; do
             echo "Checking $wheel"
+            case "$(basename "$wheel")" in
+              rapidsim-"${NEW_VERSION}"-*) ;;
+              *)
+                echo "Wheel version does not match $NEW_VERSION"
+                exit 1
+                ;;
+            esac
             python3 -m zipfile -l "$wheel" \
               | grep "rapidsim/data/simulation"
           done
