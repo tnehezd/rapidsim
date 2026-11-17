@@ -40,4 +40,3 @@ log_parameters:
 grid_options:
   output_directory: "output_gas_dze"
   max_workers: 2
-  mode: cartesian

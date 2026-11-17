@@ -3,7 +3,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 import yaml
 
@@ -92,8 +92,8 @@ class RunGridTests(unittest.TestCase):
                 log_file=log_file,
             )
 
-            with open(log_file, encoding="utf-8") as output:
-                logged_output = output.read()
+            with open(log_file, encoding="utf-8") as log_output:
+                logged_output = log_output.read()
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(logged_output, "RAPID output\n")
@@ -102,7 +102,103 @@ class RunGridTests(unittest.TestCase):
 
     @mock.patch("rapidsim.wrapper._find_binary", return_value="/fake/simulation")
     @mock.patch("rapidsim.wrapper.subprocess.run")
-    def test_runs_cartesian_grid_with_unique_output_directories(
+    def test_run_displays_rapidsim_version(
+        self, mock_run, _mock_find_binary
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(["fake"], 0)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            wrapper.run({}, check=False)
+
+        self.assertIn("RAPIDSIM PYTHON PACKAGE", output.getvalue())
+        self.assertIn(
+            "Version: {}".format(wrapper.get_version()),
+            output.getvalue(),
+        )
+        self.assertIn(
+            "|| {:^68} ||".format("RAPIDSIM PYTHON PACKAGE"),
+            output.getvalue(),
+        )
+        self.assertIn(
+            "|| {:^68} ||".format(
+                "Version: {}".format(wrapper.get_version())
+            ),
+            output.getvalue(),
+        )
+
+    @mock.patch("rapidsim.wrapper.run_grid")
+    def test_run_automatically_dispatches_multi_value_mapping_to_grid(
+        self, mock_run_grid
+    ):
+        mock_run_grid.return_value = []
+        config = {
+            "disk_parameters": {"alpha_viscosity": [0.001, 0.01]},
+            "grid_options": {"max_workers": 2},
+        }
+
+        result = wrapper.run(config, check=False)
+
+        self.assertEqual(result, [])
+        self.assertEqual(mock_run_grid.call_args.args[0], config)
+        self.assertFalse(mock_run_grid.call_args.kwargs["check"])
+
+    @mock.patch("rapidsim.wrapper.run_grid")
+    def test_run_automatically_dispatches_multi_value_yaml_to_grid(
+        self, mock_run_grid
+    ):
+        mock_run_grid.return_value = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "grid.yaml")
+            with open(config_path, "w", encoding="utf-8") as config_file:
+                yaml.safe_dump(
+                    {
+                        "disk_parameters": {
+                            "alpha_viscosity": [0.001, 0.01],
+                            "star_mass_msun": [1.0],
+                        }
+                    },
+                    config_file,
+                )
+
+            result = wrapper.run(config_path)
+
+        self.assertEqual(result, [])
+        dispatched_config = mock_run_grid.call_args.args[0]
+        self.assertEqual(
+            dispatched_config["disk_parameters"]["alpha_viscosity"],
+            [0.001, 0.01],
+        )
+        self.assertEqual(dispatched_config["disk_parameters"]["star_mass_msun"], 1.0)
+        self.assertEqual(
+            mock_run_grid.call_args.kwargs["_config_label"],
+            os.path.abspath(config_path),
+        )
+
+    @mock.patch("rapidsim.wrapper._find_binary", return_value="/fake/simulation")
+    @mock.patch("rapidsim.wrapper.subprocess.run")
+    def test_run_treats_single_value_list_as_scalar(
+        self, mock_run, _mock_find_binary
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(["fake"], 0)
+
+        result = wrapper.run(
+            {"disk_parameters": {"alpha_viscosity": [0.01]}},
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(
+            ["-alpha_init", "0.01"],
+            [
+                mock_run.call_args.args[0][index:index + 2]
+                for index in range(len(mock_run.call_args.args[0]) - 1)
+            ],
+        )
+
+    @mock.patch("rapidsim.wrapper._find_binary", return_value="/fake/simulation")
+    @mock.patch("rapidsim.wrapper.subprocess.run")
+    def test_runs_grid_with_unique_output_directories(
         self, mock_run, _mock_find_binary
     ):
         def fake_subprocess(command, **kwargs):
@@ -130,7 +226,6 @@ class RunGridTests(unittest.TestCase):
                 },
                 output_dir=grid_dir,
                 max_workers=2,
-                mode="cartesian",
             )
 
         self.assertEqual(len(results), 4)
@@ -165,7 +260,6 @@ class RunGridTests(unittest.TestCase):
                         "grid_options": {
                             "output_directory": output_dir,
                             "max_workers": 2,
-                            "mode": "paired",
                         },
                     },
                     config_file,
@@ -173,9 +267,14 @@ class RunGridTests(unittest.TestCase):
 
             output = io.StringIO()
             with redirect_stdout(output):
-                results = wrapper.run_grid(config_path)
+                results = wrapper.run_grid(config_path, mode="paired")
 
         self.assertEqual(len(results), 2)
+        self.assertIn("RAPIDSIM PYTHON PACKAGE", output.getvalue())
+        self.assertIn(
+            "Version: {}".format(wrapper.get_version()),
+            output.getvalue(),
+        )
         self.assertIn("RAPID SIMULATION CORE", output.getvalue())
         self.assertIn("Version: 2.2.3", output.getvalue())
         self.assertIn("RAPIDSIM PARAMETER GRID", output.getvalue())
@@ -235,6 +334,56 @@ class RunGridTests(unittest.TestCase):
                 for config in generated_configs
             )
         )
+
+    @mock.patch("rapidsim.wrapper._get_rapid_header", return_value=RAPID_HEADER)
+    @mock.patch("rapidsim.wrapper.run")
+    def test_grid_check_false_returns_failed_results(
+        self, mock_run, _mock_get_rapid_header
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(["fake"], 2)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            results = wrapper.run_grid(
+                {"disk_parameters": {"alpha_viscosity": 0.01}},
+                {"disk_parameters.alpha_viscosity": [0.01]},
+                output_dir=os.path.join(temp_dir, "grid"),
+                max_workers=1,
+                check=False,
+            )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].process.returncode, 2)
+
+    @mock.patch("rapidsim.wrapper.run")
+    def test_cli_returns_success_for_successful_grid(self, mock_run):
+        mock_run.return_value = [
+            wrapper.GridRunResult(
+                {"disk_parameters.alpha_viscosity": 0.01},
+                "run_0001",
+                subprocess.CompletedProcess(["fake"], 0),
+            )
+        ]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = wrapper.main(["--config", "grid.yaml"])
+
+        self.assertEqual(return_code, 0)
+        self.assertIn("Grid simulation completed successfully (1 runs).", output.getvalue())
+
+    @mock.patch("rapidsim.wrapper.run")
+    def test_cli_returns_failure_for_failed_grid(self, mock_run):
+        mock_run.return_value = [
+            wrapper.GridRunResult(
+                {"disk_parameters.alpha_viscosity": 0.01},
+                "run_0001",
+                subprocess.CompletedProcess(["fake"], 3),
+            )
+        ]
+        error_output = io.StringIO()
+        with redirect_stderr(error_output):
+            return_code = wrapper.main(["--config", "grid.yaml"])
+
+        self.assertEqual(return_code, 3)
+        self.assertIn("Grid simulation had 1 failed run(s)", error_output.getvalue())
 
     @mock.patch("rapidsim.wrapper._get_rapid_header", return_value=RAPID_HEADER)
     @mock.patch("rapidsim.wrapper.run")

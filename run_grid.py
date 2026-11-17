@@ -1,6 +1,6 @@
-from rapidsim import run_grid
+from rapidsim import run
 
-results = run_grid("config_deadzone_grid.yaml")
+results = run("config_deadzone_grid.yaml")
 
 for result in results:
     print(result.output_dir, result.process.returncode)

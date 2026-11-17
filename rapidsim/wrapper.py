@@ -219,6 +219,18 @@ def get_version():
         return "unknown"
 
 
+def _get_rapidsim_header() -> str:
+    border = "=" * 74
+    return "\n".join(
+        (
+            border,
+            "|| {:^68} ||".format("RAPIDSIM PYTHON PACKAGE"),
+            "|| {:^68} ||".format("Version: {}".format(get_version())),
+            border,
+        )
+    )
+
+
 def _read_config(config: ConfigSource) -> Dict[str, Any]:
     if isinstance(config, Mapping):
         parsed = copy.deepcopy(dict(config))
@@ -320,6 +332,11 @@ def _build_command(config: Mapping[str, Any], binary_path: str) -> List[str]:
             if yaml_key in section_values:
                 parameters[c_key] = section_values[yaml_key]
 
+    if any(isinstance(value, (list, tuple)) for value in parameters.values()):
+        raise ValueError(
+            "List-valued parameters must be resolved before running RAPID."
+        )
+
     command = [binary_path]
     log_parameters = _section(config, "log_parameters")
     verbosity = log_parameters.get("info_level", "none")
@@ -342,6 +359,32 @@ def _build_command(config: Mapping[str, Any], binary_path: str) -> List[str]:
     return command
 
 
+def _normalize_inline_parameter_lists(config: Dict[str, Any]) -> bool:
+    has_grid = False
+    for section in YAML_SECTIONS:
+        section_values = config.get(section)
+        if section_values is None:
+            continue
+        if not isinstance(section_values, dict):
+            raise ValueError(
+                "Configuration section {!r} must be a mapping.".format(section)
+            )
+        for name, value in list(section_values.items()):
+            if not isinstance(value, (list, tuple)):
+                continue
+            if not value:
+                raise ValueError(
+                    "List-valued parameter '{}.{}' cannot be empty.".format(
+                        section, name
+                    )
+                )
+            if len(value) > 1:
+                has_grid = True
+            else:
+                section_values[name] = value[0]
+    return has_grid
+
+
 def run(
     config: ConfigSource = "config.yaml",
     overrides: Optional[Mapping[str, Any]] = None,
@@ -350,8 +393,8 @@ def run(
     cwd: Optional[Union[str, os.PathLike]] = None,
     env: Optional[Mapping[str, str]] = None,
     log_file: Optional[Union[str, os.PathLike]] = None,
-) -> subprocess.CompletedProcess:
-    """Run RAPID from a YAML file or a configuration mapping."""
+) -> Union[subprocess.CompletedProcess, List[GridRunResult]]:
+    """Run RAPID once, or run a grid when a parameter has multiple values."""
     full_config = _read_config(config)
     if overrides:
         _merge_config(full_config, overrides)
@@ -360,6 +403,26 @@ def run(
         if not isinstance(output_parameters, dict):
             raise ValueError("Configuration section 'output_parameters' must be a mapping.")
         output_parameters["output_directory_name"] = os.fspath(output_dir)
+
+    has_grid = _normalize_inline_parameter_lists(full_config)
+    if has_grid or full_config.get("parameter_grid") is not None:
+        if log_file is not None:
+            raise ValueError(
+                "'log_file' is not supported for grid runs; each run gets its own log."
+            )
+        config_label = (
+            "<in-memory configuration>"
+            if isinstance(config, Mapping)
+            else os.path.abspath(os.fspath(config))
+        )
+        return run_grid(
+            full_config,
+            output_dir=output_dir,
+            check=check,
+            cwd=cwd,
+            env=env,
+            _config_label=config_label,
+        )
 
     if (
         _section(full_config, "log_parameters").get("disable_terminal_panels", False)
@@ -382,6 +445,7 @@ def run(
     )
 
     if log_file is None:
+        print(_get_rapidsim_header())
         print("\n{} --- Running: Main Simulation Program ---".format(PREFIX))
         print(
             "{} The current command-line arguments are:\n simulation {}".format(
@@ -541,6 +605,10 @@ def run_grid(
     output_dir: Optional[Union[str, os.PathLike]] = None,
     max_workers: Optional[int] = None,
     mode: Optional[str] = None,
+    check: bool = True,
+    cwd: Optional[Union[str, os.PathLike]] = None,
+    env: Optional[Mapping[str, str]] = None,
+    _config_label: Optional[str] = None,
 ) -> List[GridRunResult]:
     """Run a parameter grid from YAML or an explicit mapping, concurrently.
 
@@ -554,7 +622,7 @@ def run_grid(
     grid_options = base_config.pop("grid_options", {})
     if not isinstance(grid_options, Mapping):
         raise ValueError("Configuration section 'grid_options' must be a mapping.")
-    unknown_options = set(grid_options) - {"output_directory", "max_workers", "mode"}
+    unknown_options = set(grid_options) - {"output_directory", "max_workers"}
     if unknown_options:
         raise ValueError(
             "Unknown grid option(s): {}.".format(", ".join(sorted(unknown_options)))
@@ -575,11 +643,10 @@ def run_grid(
         output_dir = grid_options.get("output_directory", "rapidsim_grid")
     if max_workers is None:
         max_workers = grid_options.get("max_workers")
-    if mode is None:
-        mode = grid_options.get("mode", "cartesian")
-    if not isinstance(mode, str) or mode.lower() not in ("paired", "cartesian"):
-        raise ValueError("Grid mode must be 'paired' or 'cartesian'.")
-    mode = mode.lower()
+    if mode is not None:
+        if not isinstance(mode, str) or mode.lower() != "paired":
+            raise ValueError("Grid mode must be 'paired' or omitted.")
+        mode = mode.lower()
 
     if not isinstance(parameter_grid, Mapping) or not parameter_grid:
         raise ValueError(
@@ -620,7 +687,7 @@ def run_grid(
             )
             raise ValueError(
                 "Paired grid values must have matching lengths (or length 1); "
-                "got {}. Use mode='cartesian' for all combinations.".format(lengths)
+                "got {}. Omit mode to run all combinations.".format(lengths)
             )
         paired_values = [
             choices * run_count if len(choices) == 1 else choices
@@ -691,12 +758,16 @@ def run_grid(
         run_config = copy.deepcopy(base_config)
         for name, value in parameters.items():
             _set_config_value(run_config, name, value)
-        process = run(
-            run_config,
-            output_dir=run_dirs[index],
-            check=False,
-            log_file=log_paths[index],
-        )
+        run_options = {
+            "output_dir": run_dirs[index],
+            "check": False,
+            "log_file": log_paths[index],
+        }
+        if cwd is not None:
+            run_options["cwd"] = cwd
+        if env is not None:
+            run_options["env"] = env
+        process = run(run_config, **run_options)
         return GridRunResult(
             parameters,
             run_dirs[index],
@@ -706,8 +777,9 @@ def run_grid(
 
     worker_count = max_workers or min(len(combinations), os.cpu_count() or 1)
     rapid_header = _get_rapid_header(_find_binary())
+    print(_get_rapidsim_header(), flush=True)
     print(rapid_header, flush=True)
-    config_label = (
+    config_label = _config_label or (
         "<in-memory configuration>"
         if isinstance(config, Mapping)
         else os.path.abspath(os.fspath(config))
@@ -770,7 +842,7 @@ def run_grid(
             )
 
     results = [results_by_index[index] for index in range(len(combinations))]
-    if any(result.process.returncode != 0 for result in results):
+    if check and any(result.process.returncode != 0 for result in results):
         raise GridRunError(results)
     return results
 
@@ -788,20 +860,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        process = run(args.config, check=False)
+        result = run(args.config, check=False)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         print("{} Error: {}".format(PREFIX, exc), file=sys.stderr)
         return 1
-    if process.returncode == 0:
+
+    if isinstance(result, list):
+        failed_results = [
+            grid_result
+            for grid_result in result
+            if grid_result.process.returncode != 0
+        ]
+        if not failed_results:
+            print(
+                "\n{} Grid simulation completed successfully ({} runs).".format(
+                    PREFIX, len(result)
+                )
+            )
+            return 0
+        return_code = failed_results[0].process.returncode
+        print(
+            "\n{} Grid simulation had {} failed run(s); first error code: {}".format(
+                PREFIX, len(failed_results), return_code
+            ),
+            file=sys.stderr,
+        )
+        return return_code
+
+    if result.returncode == 0:
         print("\n{} Main Simulation Program completed successfully.".format(PREFIX))
     else:
         print(
             "\n{} Main Simulation Program exited with error code: {}".format(
-                PREFIX, process.returncode
+                PREFIX, result.returncode
             ),
             file=sys.stderr,
         )
-    return process.returncode
+    return result.returncode
 
 
 if __name__ == "__main__":

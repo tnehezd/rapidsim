@@ -18,6 +18,8 @@ env/
 .coverage
 htmlcov/
 
+rapidsim_AC.zip
+
 # macOS
 .DS_Store
 
@@ -25,5 +27,9 @@ htmlcov/
 testenv/
 
 
-rev
+rev.txt
 output*/
+BIRALATI_OSSZEFOGLALO.md
+guide.txt
+
+rapidsim_*/

@@ -1,7 +1,7 @@
 # ``rapidsim`` - a Python interface for the ``RAPID`` simulation code
 
 ``rapidsim`` is a lightweight Python interface and command‑line wrapper for the ``RAPID`` (Representative Approach for Particle‑Integrated Disks) simulation code.
-It provides a simple, user‑friendly way to run RAPID using a YAML configuration file, without manually invoking the underlying binary or handling command‑line flags directly.
+It provides a simple, user‑friendly way to run RAPID using either a YAML configuration file or a Python mapping, without manually invoking the underlying binary or handling command‑line flags directly.
 
 Install the package from PyPI:
 
@@ -34,26 +34,65 @@ from rapidsim import run
 run("config.yaml")
 ```
 
-Run a Cartesian parameter grid concurrently. Grid parameter names use
-`section.parameter` keys from the RAPID YAML configuration. Each run writes to
-its own subdirectory under `output_dir`; `max_workers` limits concurrent runs.
-By default, list-valued parameters vary independently and every combination
-is run. Set `mode="paired"` to combine equal-length lists by index instead;
+The configuration can also be created and modified directly in Python, without
+reading a configuration file:
+
+```python
+from rapidsim import run
+
+config = {
+    "simulation_parameters": {
+        "enable_gas_evolution": True,
+        "enable_dust_drift": False,
+        "enable_dust_growth": False,
+        "enable_photoevaporation": False,
+        "omp_num_threads": 1,
+    },
+    "disk_parameters": {
+        "number_of_grid_points": 500,
+        "inner_radius_au": 1.0,
+        "outer_radius_au": 100.0,
+        "disk_mass": 0.01,
+        "sigma_profile_exponent": 1.0,
+        "alpha_viscosity": 0.001,
+        "star_mass_msun": 1.0,
+    },
+    "deadzone_parameters": {
+        "deadzone_inner_radius_au": 2.7,
+        "deadzone_outer_radius_au": 24.0,
+        "deadzone_transition_width_mult": 1.5,
+        "deadzone_alpha_reduction": 0.01,
+    },
+    "boundary_conditions": {
+        "inner_boundary_condition": "zero_gradient",
+        "outer_boundary_condition": "zero_gradient",
+    },
+    "output_parameters": {"output_format": "ascii"},
+    "time_parameters": {
+        "total_simulation_time": 5000.0,
+        "output_write_frequency": 1000,
+    },
+    "log_parameters": {"info_level": "info"},
+}
+
+run(config, output_dir="gas_run")
+```
+
+When any RAPID parameter is given multiple values in a list, `run()` and the
+command-line interface automatically run a grid. Every combination is run, and
+each simulation writes to its own subdirectory. A one-value list is treated as
+a scalar by `run()`. The explicit `run_grid()` API is also available when you
+want to define grid values separately from the configuration. Set
+`mode="paired"` in that API to combine equal-length lists by index instead;
 single-value lists are broadcast.
 
 ```python
-from rapidsim import run_grid
+from rapidsim import run
 
-results = run_grid(
-    "config.yaml",
-    {
-        "disk_parameters.alpha_viscosity": [0.001, 0.01],
-        "disk_parameters.sigma_profile_exponent": [-0.5, -1.0],
-    },
-    output_dir="grid_runs",
-    max_workers=2,
-    mode="cartesian",
-)
+config["disk_parameters"]["alpha_viscosity"] = [0.001, 0.01]
+config["disk_parameters"]["sigma_profile_exponent"] = [-0.5, -1.0]
+config["grid_options"] = {"max_workers": 2}
+results = run(config, output_dir="grid_runs")
 ```
 
 For a YAML-defined grid, put lists directly on the parameters to vary in their
@@ -74,15 +113,14 @@ deadzone_parameters:
 grid_options:
   output_directory: "output_gas_dze"
   max_workers: 2
-  mode: cartesian
 ```
 
 Run the complete example configuration with:
 
 ```python
-from rapidsim import run_grid
+from rapidsim import run
 
-results = run_grid("config_deadzone_grid.yaml")
+results = run("config_deadzone_grid.yaml")
 ```
 
 Grid runs display RAPID's startup banner, followed by a fixed-width summary
