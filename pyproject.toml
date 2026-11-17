@@ -18,7 +18,10 @@ classifiers = [
     "Operating System :: MacOS",
 ]
 dependencies = [
-    "PyYAML", 
+    "PyYAML",
+    "numpy",
+    "h5py",
+    "matplotlib",
 ]
 
 [project.scripts]

@@ -24,6 +24,100 @@ https://github.com/tnehezd/RAPID
 API reference documentation is available at:
 https://rapiddocs.readthedocs.io/en/latest/
 
+### Python API
+
+Run RAPID from Python with either a YAML configuration file or a Python mapping:
+
+```python
+from rapidsim import run
+
+run("config.yaml")
+```
+
+Run a Cartesian parameter grid concurrently. Grid parameter names use
+`section.parameter` keys from the RAPID YAML configuration. Each run writes to
+its own subdirectory under `output_dir`; `max_workers` limits concurrent runs.
+By default, list-valued parameters vary independently and every combination
+is run. Set `mode="paired"` to combine equal-length lists by index instead;
+single-value lists are broadcast.
+
+```python
+from rapidsim import run_grid
+
+results = run_grid(
+    "config.yaml",
+    {
+        "disk_parameters.alpha_viscosity": [0.001, 0.01],
+        "disk_parameters.sigma_profile_exponent": [-0.5, -1.0],
+    },
+    output_dir="grid_runs",
+    max_workers=2,
+    mode="cartesian",
+)
+```
+
+For a YAML-defined grid, put lists directly on the parameters to vary in their
+usual configuration sections. Scalar values remain fixed. For dead-zone
+transition widths, `deadzone_transition_width_mult` is a shortcut that sets
+both inner and outer widths from one scalar or list. Use the individual
+`deadzone_inner_transition_width_mult` and
+`deadzone_outer_transition_width_mult` keys to vary them independently.
+`grid_options` sets the output directory and maximum concurrent runs:
+
+```yaml
+deadzone_parameters:
+  deadzone_inner_transition_width_mult: [1.0, 1.5, 2.0, 2.5]
+  deadzone_outer_transition_width_mult: [1.0, 1.5, 2.0, 2.5]
+  # Alternatively, one shared list varies both widths together:
+  # deadzone_transition_width_mult: [1.0, 1.5, 2.0, 2.5]
+
+grid_options:
+  output_directory: "output_gas_dze"
+  max_workers: 2
+  mode: cartesian
+```
+
+Run the complete example configuration with:
+
+```python
+from rapidsim import run_grid
+
+results = run_grid("config_deadzone_grid.yaml")
+```
+
+Grid runs display RAPID's startup banner, followed by a fixed-width summary
+panel with the full configuration and varied parameter values, then separate
+`RUNNING` status for each run. Each RAPID process's output is kept in
+`output_directory/logs/run_NNNN.log`. If the requested output directory
+already exists, the wrapper selects the next available numbered directory
+(for example, `output_gas_dze_0001`) rather than overwriting prior results.
+This behavior is implemented in the Python wrapper; the external RAPID
+executable is not modified.
+
+HDF5 snapshots can be loaded and plotted with the post-processing module.
+Set `output_parameters.output_format` to `hdf5` in the configuration.
+`load_snapshot` returns the snapshot time, radial grid, and available component
+surface densities in RAPID's native units (M_sun/AU^2).
+
+```python
+import matplotlib.pyplot as plt
+from rapidsim.postprocessing import load_snapshot, plot_snapshot
+
+snapshot = load_snapshot("grid_runs/run_0001/LOGS/snapshot_00000000.h5")
+figure, axes = plot_snapshot("grid_runs/run_0001/LOGS/snapshot_00000000.h5")
+plt.show()
+```
+
+Animate all snapshots in a run directory or its `LOGS` subdirectory:
+
+```python
+import matplotlib.pyplot as plt
+from rapidsim.postprocessing import animate_snapshots
+
+animation = animate_snapshots("grid_runs/run_0001")
+plt.show()
+```
+
 
 ----
 ### References
@@ -68,4 +162,3 @@ primaryClass = {astro-ph.EP},
     year = {2026},
     bdsk-url-1 = {https://doi.org/10.1007/s10569-026-10278-2}}
 }
-
