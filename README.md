@@ -26,6 +26,39 @@ https://rapiddocs.readthedocs.io/en/latest/
 
 ### Python API
 
+Automatic publication following a RAPID release is temporarily paused.
+The release workflow remains available for manual testing; normal push/PR
+wheel builds are unchanged. Restore the commented `repository_dispatch`
+trigger in `.github/workflows/release.yml` to resume automatic releases.
+
+### Dust size options
+
+For fixed-size drift, disable growth and set
+`dust_parameters.one_size_particle_value_cm` (grain radius in cm).
+The alias `large_size_particle_value_cm` remains supported.
+For a constant Stokes number instead, use:
+
+```yaml
+simulation_parameters:
+  enable_dust_drift: true
+  enable_dust_growth: false
+  enable_two_dust_populations: false
+dust_parameters:
+  constant_stokes_number: 0.1
+```
+
+This forwards `-stokes 0.1`; the equivalent grain radius follows the local
+gas density rather than staying fixed. Do not combine this option with a
+nonzero fixed size, an input profile or a benchmark mode. It requires a
+RAPID binary supporting `-stokes`; changing the wrapper does not update
+the bundled binary or an already published PyPI package.
+
+`fragmentation_velocity` (cm/s) and `fragmentation_factor` in
+`simulation_parameters` forward `-ufrag` and `-ffrag`, respectively.
+These settings also work in Python mappings and parameter grids.
+
+### Running from Python
+
 Run RAPID from Python with either a YAML configuration file or a Python mapping:
 
 ```python

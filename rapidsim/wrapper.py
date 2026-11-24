@@ -3,6 +3,7 @@ import copy
 import datetime
 import importlib.metadata
 import itertools
+import math
 import os
 import re
 import subprocess
@@ -62,6 +63,7 @@ YAML_TO_C_MAPPING = {
     "micro_particle_size_cm": "mic_val",
     "large_size_particle_value_cm": "onesize_val",
     "one_size_particle_value_cm": "onesize_val",
+    "constant_stokes_number": "fixed_stokes",
     "dust_particle_density_g_cm3": "pdensity_val",
     "input_file_path": "input_file",
     "output_directory_name": "output_dir_name",
@@ -111,6 +113,7 @@ C_ARG_MAPPING = {
     "ratio_val": "-ratio",
     "mic_val": "-micsize",
     "onesize_val": "-largesize",
+    "fixed_stokes": "-stokes",
     "pdensity_val": "-pdensity",
     "test_mode": "-test",
     "gaussian_smoothing_sigma_grid_units": "-gaussian_sigma_grid_units",
@@ -155,6 +158,11 @@ PANEL_PARAMETER_LABELS = {
     "simulation_parameters.enable_dust_drift": "Dust drift",
     "simulation_parameters.enable_dust_growth": "Dust growth",
     "simulation_parameters.enable_photoevaporation": "Photoevaporation",
+    "simulation_parameters.fragmentation_velocity": "Fragmentation velocity (cm/s)",
+    "simulation_parameters.fragmentation_factor": "Fragmentation factor",
+    "dust_parameters.one_size_particle_value_cm": "Fixed grain radius (cm)",
+    "dust_parameters.large_size_particle_value_cm": "Fixed grain radius (cm)",
+    "dust_parameters.constant_stokes_number": "Constant Stokes number",
     "disk_parameters.star_mass_msun": "Stellar mass (Solar Mass)",
     "disk_parameters.aspect_ratio_at_1au": "Disk aspect ratio (H/R)",
     "disk_parameters.flaring_index": "Disk flaring index",
@@ -336,6 +344,26 @@ def _build_command(config: Mapping[str, Any], binary_path: str) -> List[str]:
         raise ValueError(
             "List-valued parameters must be resolved before running RAPID."
         )
+
+    if "fixed_stokes" in parameters:
+        stokes = parameters["fixed_stokes"]
+        if (isinstance(stokes, bool) or not isinstance(stokes, (int, float))
+                or not math.isfinite(stokes) or stokes <= 0):
+            raise ValueError("constant_stokes_number must be a finite positive number.")
+        if (parameters.get("drift", True) != True
+                or parameters.get("growth", True) != False
+                or parameters.get("twopop", True) != False):
+            raise ValueError(
+                "constant_stokes_number requires dust drift enabled, "
+                "dust growth disabled and two dust populations disabled."
+            )
+        if (parameters.get("onesize_val", 0) != 0
+                or parameters.get("input_file") is not None
+                or parameters.get("test_mode") is not None):
+            raise ValueError(
+                "constant_stokes_number cannot be combined with a fixed grain "
+                "size, an input profile or a benchmark mode."
+            )
 
     command = [binary_path]
     log_parameters = _section(config, "log_parameters")

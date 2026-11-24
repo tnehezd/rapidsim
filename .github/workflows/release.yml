@@ -1,8 +1,9 @@
 name: Release rapidsim
 
 on:
-  repository_dispatch:
-    types: [rapid-release]
+  # Temporarily paused: restore this trigger to resume automatic RAPID releases.
+  # repository_dispatch:
+  #   types: [rapid-release]
 
   workflow_dispatch:
     inputs:
