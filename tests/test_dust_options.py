@@ -21,7 +21,7 @@ class DustOptionsTests(unittest.TestCase):
 
     def test_constant_stokes_command(self):
         command = wrapper._build_command(self.config, "/fake/simulation")
-        self.assertEqual(command[-2:], ["-stokes", "0.1"])
+        self.assertEqual(command[command.index("-stokes") + 1], "0.1")
         self.assertNotIn("-largesize", command)
 
     def test_invalid_stokes(self):
@@ -40,7 +40,7 @@ class DustOptionsTests(unittest.TestCase):
             config["simulation_parameters"][key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
                 wrapper._build_command(config, "/fake/simulation")
-        for key in ("enable_dust_growth", "enable_two_dust_populations"):
+        for key in ("enable_dust_growth",):
             config = copy.deepcopy(self.config)
             del config["simulation_parameters"][key]
             with self.subTest(missing=key), self.assertRaises(ValueError):
@@ -69,8 +69,29 @@ class DustOptionsTests(unittest.TestCase):
             }, "/fake/simulation")
             self.assertEqual(command[1:], [
                 "-ufrag", "500.0", "-ffrag", "0.37", "-largesize", "0.1",
+                "-twopop", "0", "-ratio", "1",
             ])
             self.assertNotIn("-stokes", command)
+
+    def test_two_population_disabled_and_default_off(self):
+        for key in ("enable_two_dust_populations", "population_one_mass_ratio",
+                    "micro_particle_size_cm"):
+            self.assertNotIn(key, wrapper.YAML_TO_C_MAPPING)
+        for section in ("simulation_parameters", "dust_parameters"):
+            with self.subTest(section=section), self.assertRaisesRegex(ValueError, "temporarily disabled"):
+                wrapper._build_command({section: {"enable_two_dust_populations": True}},
+                                       "/fake/simulation")
+        with self.assertRaisesRegex(ValueError, "mass_ratio must be 1"):
+            wrapper._build_command({"dust_parameters": {"population_one_mass_ratio": .85}},
+                                   "/fake/simulation")
+        with self.assertRaisesRegex(ValueError, "micro_particle_size_cm is unavailable"):
+            wrapper._build_command({"dust_parameters": {"micro_particle_size_cm": 1e-4}},
+                                   "/fake/simulation")
+        config = copy.deepcopy(self.config)
+        del config["simulation_parameters"]["enable_two_dust_populations"]
+        command = wrapper._build_command(config, "/fake/simulation")
+        self.assertEqual(command[command.index("-twopop") + 1], "0")
+        self.assertEqual(command[command.index("-ratio") + 1], "1")
 
     @mock.patch("rapidsim.wrapper._find_binary", return_value="/fake/simulation")
     @mock.patch("rapidsim.wrapper.subprocess.run")

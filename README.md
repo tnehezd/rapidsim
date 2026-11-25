@@ -33,6 +33,13 @@ trigger in `.github/workflows/release.yml` to resume automatic releases.
 
 ### Dust size options
 
+Two-population dust is temporarily disabled pending coagulation mass-transfer
+validation. The public configuration no longer offers population splitting
+or micron-size settings. All dust mass belongs to one population.
+The wrapper selects this mode explicitly, including for older bundled binaries;
+legacy settings requesting two populations or a mass split are rejected.
+Single-population drift and growth remain available.
+
 For fixed-size drift, disable growth and set
 `dust_parameters.one_size_particle_value_cm` (grain radius in cm).
 The alias `large_size_particle_value_cm` remains supported.
@@ -42,7 +49,6 @@ For a constant Stokes number instead, use:
 simulation_parameters:
   enable_dust_drift: true
   enable_dust_growth: false
-  enable_two_dust_populations: false
 dust_parameters:
   constant_stokes_number: 0.1
 ```

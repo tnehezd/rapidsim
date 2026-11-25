@@ -24,7 +24,6 @@ YAML_TO_C_MAPPING = {
     "enable_dust_growth": "growth",
     "enable_gas_evolution": "evol",
     "enable_photoevaporation": "photoevap",
-    "enable_two_dust_populations": "twopop",
     "fragmentation_velocity": "ufrag",
     "fragmentation_factor": "ffrag",
     "inner_boundary_condition": "inner_bc",
@@ -59,8 +58,6 @@ YAML_TO_C_MAPPING = {
     "deadzone_outer_transition_width_mult": "dr_dze_o_val",
     "deadzone_alpha_reduction": "a_mod_val",
     "initial_dust_to_gas_ratio": "eps_val",
-    "population_one_mass_ratio": "ratio_val",
-    "micro_particle_size_cm": "mic_val",
     "large_size_particle_value_cm": "onesize_val",
     "one_size_particle_value_cm": "onesize_val",
     "constant_stokes_number": "fixed_stokes",
@@ -336,6 +333,12 @@ def _build_command(config: Mapping[str, Any], binary_path: str) -> List[str]:
 
     for section in YAML_SECTIONS:
         section_values = _section(config, section)
+        if section_values.get("enable_two_dust_populations", False) != False:
+            raise ValueError("Two-population dust is temporarily disabled pending coagulation mass-transfer validation.")
+        if section_values.get("population_one_mass_ratio", 1) != 1:
+            raise ValueError("population_one_mass_ratio must be 1 while two-population dust is disabled.")
+        if "micro_particle_size_cm" in section_values:
+            raise ValueError("micro_particle_size_cm is unavailable while two-population dust is disabled; remove this setting.")
         for yaml_key, c_key in YAML_TO_C_MAPPING.items():
             if yaml_key in section_values:
                 parameters[c_key] = section_values[yaml_key]
@@ -345,17 +348,19 @@ def _build_command(config: Mapping[str, Any], binary_path: str) -> List[str]:
             "List-valued parameters must be resolved before running RAPID."
         )
 
+    parameters["twopop"] = 0
+    parameters["ratio_val"] = 1
+
     if "fixed_stokes" in parameters:
         stokes = parameters["fixed_stokes"]
         if (isinstance(stokes, bool) or not isinstance(stokes, (int, float))
                 or not math.isfinite(stokes) or stokes <= 0):
             raise ValueError("constant_stokes_number must be a finite positive number.")
         if (parameters.get("drift", True) != True
-                or parameters.get("growth", True) != False
-                or parameters.get("twopop", True) != False):
+                or parameters.get("growth", True) != False):
             raise ValueError(
                 "constant_stokes_number requires dust drift enabled, "
-                "dust growth disabled and two dust populations disabled."
+                "dust growth disabled."
             )
         if (parameters.get("onesize_val", 0) != 0
                 or parameters.get("input_file") is not None
